@@ -168,6 +168,36 @@ export interface AISummary {
   structured_payload: Record<string, unknown>;
 }
 
+export interface HourlyAISummary {
+  status: 'ok' | 'no_data' | 'unavailable';
+  provider: string;
+  model?: string;
+  message?: string;
+  time_window?: {
+    start_time: string;
+    end_time: string;
+    label: string;
+  };
+  blocks_analyzed?: number;
+  transactions_analyzed?: number;
+  overview?: string;
+  block_activity?: string;
+  transaction_activity?: string;
+  address_activity?: string;
+  notable_patterns?: string;
+  investigation_focus?: string;
+  aggregated?: {
+    total_btc_transferred?: number;
+    average_transaction_btc?: number;
+    largest_transaction_btc?: number;
+    smallest_transaction_btc?: number;
+    average_time_between_blocks_seconds?: number;
+    first_block_height?: number;
+    last_block_height?: number;
+  };
+  structured_payload?: Record<string, unknown>;
+}
+
 export interface PatternPoint {
   block_height: number;
   timestamp: number;

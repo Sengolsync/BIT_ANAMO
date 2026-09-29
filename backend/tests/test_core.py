@@ -70,3 +70,43 @@ def test_ai_malformed_groq_response_falls_back():
 
     assert result["status"] == "unavailable"
     assert "structured_payload" in result
+
+
+def test_hourly_summary_includes_only_the_selected_window_and_excludes_end_boundary():
+    service = AIService()
+    service.groq_key = "test-key"
+    payload = {
+        "time_window": {"start_time": "2026-09-20T15:00:00+00:00", "end_time": "2026-09-20T16:00:00+00:00"},
+        "blocks": [
+            {"height": 101, "timestamp": 1758370800},
+            {"height": 102, "timestamp": 1758374400},
+            {"height": 103, "timestamp": 1758378000},
+        ],
+        "transactions": {"total": 4, "btc_transferred": 12.5, "avg_tx_btc": 3.125, "largest_tx_btc": 5.0, "smallest_tx_btc": 0.5},
+        "addresses": {"top_addresses": [{"address": "addr-1", "tx_count": 2, "total_in_btc": 6.0, "total_out_btc": 1.5}]},
+    }
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"choices": [{"message": {"content": '{"overview": "The hour was active.", "block_activity": "3 blocks were seen.", "transaction_activity": "4 transactions moved 12.5 BTC.", "address_activity": "Top address was addr-1.", "notable_patterns": "No unusual behavior stood out.", "investigation_focus": "Review the largest transfer and recurring address activity."}'}}]}
+
+    client = AsyncMock()
+    client.__aenter__.return_value.post.return_value = response
+    with patch("app.services.ai_service.httpx.AsyncClient", return_value=client):
+        result = asyncio.run(service.summarize_hourly_window(payload))
+
+    assert result["status"] == "ok"
+    assert result["overview"] == "The hour was active."
+    assert result["block_activity"] == "3 blocks were seen."
+    assert result["transaction_activity"] == "4 transactions moved 12.5 BTC."
+
+
+def test_hourly_summary_no_data_response_is_clean():
+    service = AIService()
+    result = asyncio.run(service.summarize_hourly_window({
+        "time_window": {"start_time": "2026-09-20T15:00:00+00:00", "end_time": "2026-09-20T16:00:00+00:00"},
+        "blocks": [],
+        "transactions": {"total": 0, "btc_transferred": 0.0},
+        "addresses": {"top_addresses": []},
+    }))
+    assert result["status"] == "no_data"
+    assert "No Bitcoin blocks" in result["message"]

@@ -87,7 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && (
               <div className="flex flex-col truncate">
                 <span className="font-bold text-sm tracking-wider text-white font-mono flex items-center gap-1.5">
-                  BITCOIN<span className="text-btc-primary">INTEL</span>
+                  <span>BIT</span><span className="text-btc-primary">ANAMO</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono tracking-wider uppercase">
                   Mission Control v1.0

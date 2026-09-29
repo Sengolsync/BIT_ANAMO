@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Boxes,
   Coins,
@@ -10,9 +10,10 @@ import {
   Activity,
   ArrowRight,
   ShieldCheck,
+  Bot,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { BlockSummary, RankedAddress } from '../types';
+import { BlockSummary, HourlyAISummary, RankedAddress } from '../types';
 import { useRealtime } from '../context/useRealtime';
 import { StatCard } from '../components/ui/StatCard';
 import { Badge } from '../components/ui/Badge';
@@ -34,6 +35,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigateTo }) =>
   const [activeMetric, setActiveMetric] = useState<'txs' | 'volume' | 'fees' | 'in_out' | 'addresses'>('volume');
   const [topAddresses, setTopAddresses] = useState<RankedAddress[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [hourlyStart, setHourlyStart] = useState<string>('15:00');
+  const [hourlyLoading, setHourlyLoading] = useState<boolean>(false);
+  const [hourlySummary, setHourlySummary] = useState<HourlyAISummary | null>(null);
+  const [hourlyError, setHourlyError] = useState<string>('');
+
+  const defaultHourlyDate = useMemo(() => {
+    const now = new Date();
+    const rounded = new Date(now);
+    rounded.setMinutes(0, 0, 0);
+    rounded.setHours(rounded.getHours() - 1);
+    return rounded.toISOString().slice(0, 16);
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
@@ -58,6 +71,22 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigateTo }) =>
   };
 
   const currentBlock = latestBlock || (blocks.length > 0 ? blocks[0] : null);
+
+  const handleGenerateHourlySummary = async () => {
+    try {
+      setHourlyLoading(true);
+      setHourlyError('');
+      const selectedDate = new Date(`${defaultHourlyDate.slice(0, 10)}T${hourlyStart}:00Z`);
+      const result = await api.generateHourlyAISummary(selectedDate.toISOString());
+      setHourlySummary(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The one-hour AI summary could not be generated.';
+      setHourlyError(message);
+      setHourlySummary(null);
+    } finally {
+      setHourlyLoading(false);
+    }
+  };
 
   // Prepare chart data across recent blocks
   const chronologicalBlocks = [...blocks].reverse();
@@ -245,6 +274,78 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigateTo }) =>
           </button>
         </div>
       )}
+
+      <div className="intel-card p-5 border-intel-cyan/40">
+        <div className="flex items-center gap-2 mb-4">
+          <Bot className="w-4 h-4 text-intel-cyan" />
+          <h2 className="text-sm font-bold font-mono text-white tracking-wider uppercase">AI 1-HOUR INTELLIGENCE</h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-end">
+          <label className="block">
+            <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-mono mb-2">Start Time</span>
+            <input
+              type="time"
+              value={hourlyStart}
+              onChange={(e) => setHourlyStart(e.target.value)}
+              className="w-full rounded-lg border border-dark-700 bg-dark-950 px-3 py-2 text-white font-mono text-sm focus:border-intel-cyan focus:outline-none"
+            />
+          </label>
+
+          <div className="rounded-xl border border-dark-700 bg-dark-950/60 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-400 font-mono mb-2">Analysis Window</div>
+            <div className="font-mono text-sm text-slate-200">
+              {hourlyStart} → {String((Number(hourlyStart.split(':')[0]) + 1) % 24).padStart(2, '0') + ':' + hourlyStart.split(':')[1]}
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={handleGenerateHourlySummary}
+          disabled={hourlyLoading}
+          className="mt-4 px-3 py-2 rounded-lg bg-intel-cyan/15 border border-intel-cyan/40 text-intel-cyan text-xs font-mono font-bold disabled:opacity-50"
+        >
+          {hourlyLoading ? 'Analyzing blocks from ' + hourlyStart + ' to ' + (String((Number(hourlyStart.split(':')[0]) + 1) % 24).padStart(2, '0') + ':' + hourlyStart.split(':')[1]) + '...' : 'Generate 1-Hour Summary'}
+        </button>
+
+        {hourlyError && (
+          <div className="mt-4 rounded-lg border border-intel-amber/40 bg-intel-amber/10 p-3 text-xs font-mono text-intel-amber">
+            {hourlyError}
+          </div>
+        )}
+
+        {hourlySummary && (
+          <div className="mt-5 rounded-lg border border-intel-cyan/30 bg-dark-950/80 p-4 text-xs font-mono text-slate-200">
+            <div className="mb-3 text-[10px] uppercase tracking-wider text-slate-400">
+              {hourlySummary.time_window?.label || 'Selected window'}
+            </div>
+
+            {hourlySummary.status === 'no_data' ? (
+              <p className="text-slate-200">No Bitcoin blocks were received during this time window.</p>
+            ) : hourlySummary.status === 'ok' ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px]">
+                  <div className="rounded border border-dark-700 bg-dark-900/70 p-2"><span className="block text-slate-400 mb-1">Blocks</span><strong className="text-white">{hourlySummary.blocks_analyzed ?? 0}</strong></div>
+                  <div className="rounded border border-dark-700 bg-dark-900/70 p-2"><span className="block text-slate-400 mb-1">Transactions</span><strong className="text-white">{hourlySummary.transactions_analyzed ?? 0}</strong></div>
+                  <div className="rounded border border-dark-700 bg-dark-900/70 p-2"><span className="block text-slate-400 mb-1">BTC Transferred</span><strong className="text-white">{hourlySummary.aggregated?.total_btc_transferred ?? 0} BTC</strong></div>
+                  <div className="rounded border border-dark-700 bg-dark-900/70 p-2"><span className="block text-slate-400 mb-1">Avg Tx</span><strong className="text-white">{hourlySummary.aggregated?.average_transaction_btc ?? 0} BTC</strong></div>
+                </div>
+
+                <div className="space-y-3">
+                  <div><div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Overview</div><p className="leading-relaxed text-slate-200">{hourlySummary.overview}</p></div>
+                  <div><div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Block Activity</div><p className="leading-relaxed text-slate-200">{hourlySummary.block_activity}</p></div>
+                  <div><div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Transaction Activity</div><p className="leading-relaxed text-slate-200">{hourlySummary.transaction_activity}</p></div>
+                  <div><div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Address Activity</div><p className="leading-relaxed text-slate-200">{hourlySummary.address_activity}</p></div>
+                  <div><div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Notable Patterns</div><p className="leading-relaxed text-slate-200">{hourlySummary.notable_patterns}</p></div>
+                  <div><div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Investigation Focus</div><p className="leading-relaxed text-slate-200">{hourlySummary.investigation_focus}</p></div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-slate-200">{hourlySummary.message || 'The AI summary is currently unavailable.'}</p>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Interactive Charts Section with Metric Switcher */}
       <div className="intel-card p-5">

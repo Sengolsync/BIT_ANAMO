@@ -7,6 +7,7 @@ import {
   HealthStatus,
   TransactionItem,
   AISummary,
+  HourlyAISummary,
   PatternPoint
 } from '../types';
 import { normalizeAddressDetail, normalizeAISummary, normalizeBlockAnalysis, normalizeBlockSummary, normalizeFollowedAddress, normalizeFollowUpEvent, normalizeHealthStatus, normalizePatternPoint, normalizeTransaction } from './normalizers';
@@ -152,6 +153,32 @@ class ApiClient {
 
   async getAIBlockSummary(heightOrHash: string | number): Promise<AISummary> {
     return normalizeAISummary(await this.fetchJson<unknown>(`/ai/block/${heightOrHash}`));
+  }
+
+  async generateHourlyAISummary(startTime: string): Promise<HourlyAISummary> {
+    const response = await this.fetchJson<unknown>('/ai/hourly-summary', {
+      method: 'POST',
+      body: JSON.stringify({ start_time: startTime })
+    });
+
+    const raw = response as Record<string, unknown>;
+    return {
+      status: raw.status === 'ok' ? 'ok' : raw.status === 'no_data' ? 'no_data' : 'unavailable',
+      provider: typeof raw.provider === 'string' ? raw.provider : 'groq',
+      model: typeof raw.model === 'string' ? raw.model : undefined,
+      message: typeof raw.message === 'string' ? raw.message : undefined,
+      time_window: typeof raw.time_window === 'object' && raw.time_window !== null ? raw.time_window as { start_time: string; end_time: string; label: string } : undefined,
+      blocks_analyzed: typeof raw.blocks_analyzed === 'number' ? raw.blocks_analyzed : undefined,
+      transactions_analyzed: typeof raw.transactions_analyzed === 'number' ? raw.transactions_analyzed : undefined,
+      overview: typeof raw.overview === 'string' ? raw.overview : undefined,
+      block_activity: typeof raw.block_activity === 'string' ? raw.block_activity : undefined,
+      transaction_activity: typeof raw.transaction_activity === 'string' ? raw.transaction_activity : undefined,
+      address_activity: typeof raw.address_activity === 'string' ? raw.address_activity : undefined,
+      notable_patterns: typeof raw.notable_patterns === 'string' ? raw.notable_patterns : undefined,
+      investigation_focus: typeof raw.investigation_focus === 'string' ? raw.investigation_focus : undefined,
+      aggregated: typeof raw.aggregated === 'object' && raw.aggregated !== null ? raw.aggregated as HourlyAISummary['aggregated'] : undefined,
+      structured_payload: typeof raw.structured_payload === 'object' && raw.structured_payload !== null ? raw.structured_payload as Record<string, unknown> : {}
+    };
   }
 
   getEventSourceUrl(): string {

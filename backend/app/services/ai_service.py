@@ -30,7 +30,7 @@ class AIService:
         )
         return {field: block_summary.get(field) for field in fields}
 
-    async def _complete(self, system_prompt: str, user_payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _request_groq_json(self, system_prompt: str, user_payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.is_configured():
             return {
                 "status": "unavailable",
@@ -60,14 +60,14 @@ class AIService:
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("Groq response did not contain message content")
                 parsed = json.loads(content)
-                if not isinstance(parsed, dict) or not isinstance(parsed.get("summary"), str):
-                    raise ValueError("Groq response did not contain a valid summary object")
+                if not isinstance(parsed, dict):
+                    raise ValueError("Groq response did not contain a valid JSON object")
                 return {
                     "status": "ok",
                     "provider": "groq",
                     "model": self.model,
-                    "summary": parsed["summary"],
                     "structured_payload": user_payload,
+                    **parsed,
                 }
             except (httpx.HTTPError, ValueError, KeyError, IndexError, json.JSONDecodeError) as exc:
                 if attempt >= settings.AI_MAX_RETRIES:
@@ -83,6 +83,26 @@ class AIService:
 
         raise RuntimeError("Unreachable AI retry state")
 
+    async def _complete(self, system_prompt: str, user_payload: Dict[str, Any]) -> Dict[str, Any]:
+        parsed = await self._request_groq_json(system_prompt, user_payload)
+        if parsed.get("status") != "ok":
+            return parsed
+        summary = parsed.get("summary")
+        if not isinstance(summary, str):
+            return {
+                "status": "unavailable",
+                "provider": "groq",
+                "message": "Groq response did not contain a valid summary object.",
+                "structured_payload": user_payload,
+            }
+        return {
+            "status": "ok",
+            "provider": "groq",
+            "model": parsed.get("model"),
+            "summary": summary,
+            "structured_payload": user_payload,
+        }
+
     async def summarize_block(self, block_summary: Dict[str, Any]) -> Dict[str, Any]:
         """
         Summarizes block intelligence.
@@ -96,6 +116,66 @@ class AIService:
             "If the scope is partial, clearly say the observations apply only to analyzed transactions."
         )
         return await self._complete(system_prompt, payload)
+
+    async def summarize_hourly_window(self, hourly_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Creates a compact one-hour intelligence summary from local block-level statistics."""
+        blocks = hourly_payload.get("blocks") or []
+        if not blocks:
+            return {
+                "status": "no_data",
+                "provider": "groq",
+                "message": "No Bitcoin blocks were received during this time window.",
+                "time_window": hourly_payload.get("time_window"),
+                "blocks_analyzed": 0,
+                "transactions_analyzed": hourly_payload.get("transactions", {}).get("total", 0),
+                "structured_payload": hourly_payload,
+            }
+
+        system_prompt = (
+            "You are producing a concise but detailed Bitcoin one-hour intelligence summary from verified local analytics. "
+            "Use only the supplied statistics and do not invent addresses, identities, or criminal activity. "
+            "Discuss the selected hour in neutral terms such as unusual, notable, high activity, significant transaction, and requires review. "
+            "Return a JSON object with exactly these keys: overview, block_activity, transaction_activity, address_activity, notable_patterns, investigation_focus. "
+            "Keep the report 3 to 6 compact but meaningful sections and ground every claim in the provided stats."
+        )
+
+        result = await self._request_groq_json(system_prompt, hourly_payload)
+        if result.get("status") != "ok":
+            return {
+                **result,
+                "time_window": hourly_payload.get("time_window"),
+                "blocks_analyzed": len(blocks),
+                "transactions_analyzed": hourly_payload.get("transactions", {}).get("total", 0),
+            }
+
+        required = ["overview", "block_activity", "transaction_activity", "address_activity", "notable_patterns", "investigation_focus"]
+        parsed = {key: result.get(key) for key in required}
+        if not all(isinstance(parsed[key], str) and parsed[key].strip() for key in required):
+            return {
+                "status": "unavailable",
+                "provider": "groq",
+                "message": "Groq returned an incomplete hourly intelligence structure.",
+                "time_window": hourly_payload.get("time_window"),
+                "blocks_analyzed": len(blocks),
+                "transactions_analyzed": hourly_payload.get("transactions", {}).get("total", 0),
+                "structured_payload": hourly_payload,
+            }
+
+        return {
+            "status": "ok",
+            "provider": "groq",
+            "model": result.get("model"),
+            "time_window": hourly_payload.get("time_window"),
+            "blocks_analyzed": len(blocks),
+            "transactions_analyzed": hourly_payload.get("transactions", {}).get("total", 0),
+            "overview": parsed["overview"],
+            "block_activity": parsed["block_activity"],
+            "transaction_activity": parsed["transaction_activity"],
+            "address_activity": parsed["address_activity"],
+            "notable_patterns": parsed["notable_patterns"],
+            "investigation_focus": parsed["investigation_focus"],
+            "structured_payload": hourly_payload,
+        }
 
     async def summarize_address(self, address_summary: Dict[str, Any]) -> Dict[str, Any]:
         """Summarizes address behavior based on structured historical activity."""
